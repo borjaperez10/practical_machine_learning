@@ -1,0 +1,185 @@
+---
+title: '8-Practical Machine Learning: Course Project'
+author: "Borja Perez"
+date: "2 de junio de 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+
+## Loading the data:
+```{r}
+training = read.csv("C:/Users/Borja/Documents/Workspace coursera/8.-Practical_Machine_Learning/FinalCourseProject/pml-training.csv", na.strings=c("NA","#DIV/0!", ""))
+testing = read.csv("C:/Users/Borja/Documents/Workspace coursera/8.-Practical_Machine_Learning/FinalCourseProject/pml-testing.csv", na.strings=c("NA","#DIV/0!", ""))
+
+library(caret)
+library(rpart)
+library(randomForest)
+library(rattle)
+library(corrplot)
+
+set.seed(2332)
+```
+
+
+
+
+## How to use cross validation
+A cross validation will be done in this case in the training set. A sub training set will be obtained by randomly subsamping the training set into 70% of the samples, and a sub testing set will be obtained from the 30% of the data. The models that are described in this document will be fitted using the training set, and are going to be tested using the sub testing samples. 
+The most accurate model will be the one that will be used to test the complette Test set. 
+
+## What is the expected out of sample error
+The expected out of errors are also estimated for each of the models that are used apart from the accuracy of each model.  
+## Why those choices were made
+In each section all the decissions taken are described. 
+## Partitioning the data set
+As commented in the cross validation section, 70% will be used for fitting the model (subTraining) and 30% for testing each model (subTesting). The variable to predict will be classe. 
+```{r}
+inTrain <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+subTraining <- training[inTrain,]
+subTesting <- training[-inTrain,]
+```
+#Cleaning the data:
+Data must be cleaned. The first 7 features must be removed, as they dont offer any predictable information. Apart from this, all the predict variables that have a big NA rate will be removed also. All variables that have more than 50% of NAs were removed. 
+
+
+```{r}
+toRemove <- grep("X|name|timestamp|window", colnames(training))
+subTraining <- subTraining[-toRemove]
+
+naCount<-sapply(subTraining, function(x){sum(is.na(x))})
+percentageNA<- (100*naCount)/dim(subTraining)[1]
+removeNAs<- which(percentageNA>50)
+subTraining <- subTraining[-removeNAs]
+```
+
+The dataset may contain many variables and many of these variables may have extemely low variances. This means that there is very little information in these variables because they mostly consist of a single value. Checking for the zero variance variable to collect useful variables for constructing a prediction model. In this case, all nzv variables are FALSE, so there is no need to remove anyone. 
+
+```{r}
+myDataNZV <- nearZeroVar(subTraining, saveMetrics=TRUE)
+sum(myDataNZV$nzv)
+```
+
+The testing and subtesting datasets are also partitioned, including the same columns as the subtraining dataset. In the case of the testing dataset, the outcome (classe) is also removed, as it is the variable that we are trying to predict. 
+```{r}
+clean <- colnames(subTraining)
+cleanNoClasse <- grep("classe", clean)
+cleanNoPredictClass <- colnames(subTraining[, -cleanNoClasse]) #Without classe
+subTesting <- subTesting[clean]
+testing <- testing[cleanNoPredictClass]
+
+```
+
+##Correlation
+
+The following figure shows a correlation between all the variables, which has been done before to modelling procedure. It can be seen that there are not many high correlation values. 
+```{r}
+corMatrix <- cor(subTraining[, -cleanNoClasse])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+In case that we would like to filter between the most higher correlated variables, PCA (Principal Component Analysis) could be performed. Principal Component Analysis (PCA) is a useful technique for exploratory data analysis, allowing you to better visualize the variation present in a dataset with many variables. It is particularly helpful in the case of "wide" datasets, where you have many variables for each sample.
+
+
+##Creating the models:
+
+
+###Decission trees
+```{r}
+model1 <- rpart(classe ~ ., data=subTraining, method="class")
+pred1 <- predict(model1, newdata=subTesting, type="class")
+confusionMatrix(pred1, subTesting$classe)$overall[1]
+error <- 1 - as.numeric(confusionMatrix(subTesting$classe, pred1)$overall[1])
+error
+fancyRpartPlot(model1)
+acc <- confusionMatrix(pred1, subTesting$classe)$overall[[1]]
+```
+
+We will apply a Random Forest model, a model that somehow averages multiple deep decission trees that are trained on differernt parts of the same data set (with the aim to reduce the variance). In this case, a 5-fold cross validation is used in the algorithm. This means that the original dataset is randomly partitione into 5 equalsized subsamples. One of these 5 samples will be used for validation and the other four will be used as training data. This process is repeated n times (in this case 5), and all the obtained results are averaged. As it can be seen, this model offers a 0.9906542 of accuracy. 
+
+###Random Forest
+```{r}
+trainContr <- trainControl(method="cv", 5)
+model2 <- train(classe ~ ., data=subTraining, method="rf",
+                 trControl=trainContr, ntree=251)
+pred2 <- predict(model2, subTesting)
+confusionMatrix(pred2, subTesting$classe)$overall[1]
+error <- 1 - as.numeric(confusionMatrix(subTesting$classe, pred2)$overall[1])
+error
+acc <- cbind(acc, confusionMatrix(pred2, subTesting$classe)$overall[[1]])
+
+```
+
+We can also use the randomForest method. This offers a better result:
+
+```{r}
+model3 <- randomForest(classe ~. , data=subTraining)
+pred3 <- predict(model3, subTesting)
+confusionMatrix(pred3, subTesting$classe)$overall[1]
+1 - as.numeric(confusionMatrix(subTesting$classe, pred3)$overall[1])
+error
+acc <- cbind(acc, confusionMatrix(pred3, subTesting$classe)$overall[[1]])
+
+```
+
+###Other models
+We can also use the lda model. The gbm (Generalized Boosted Model)is also computed:
+
+```{r}
+
+model4 <- train(classe ~ ., data = subTraining, method = "lda")
+pred4 <- predict(model4, subTesting)
+confusionMatrix(pred4, subTesting$classe)$overall[1]
+1 - as.numeric(confusionMatrix(subTesting$classe, pred4)$overall[1])
+error
+acc <- cbind(acc, confusionMatrix(pred4, subTesting$classe)$overall[[1]])
+
+
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+model5  <- train(classe ~ ., data=subTraining, method = "gbm",  trControl = controlGBM, verbose = FALSE)
+pred5 <- predict(model5, subTesting)
+confusionMatrix(pred5, subTesting$classe)$overall[1]
+1 - as.numeric(confusionMatrix(subTesting$classe, pred5)$overall[1])
+error
+acc <- cbind(acc, confusionMatrix(pred5, subTesting$classe)$overall[[1]])
+
+
+```
+###Combining models:
+Simple models can be combined into a more complex model. This class of techniques is called ensemble methods, and can be very successful. We will test it on the previous models:
+```{r}
+#Fit a model that combines the predictors
+predDF <- data.frame(pred4, pred5, classe = subTesting$classe)
+combModFit <- train(classe~., method = "rf", data = predDF)
+combPred <- predict(combModFit, predDF)
+confusionMatrix(combPred, subTesting$classe)$overall[1]
+error <- 1 - as.numeric(confusionMatrix(subTesting$classe, combPred)$overall[1])
+error
+acc <- cbind(acc, confusionMatrix(combPred, subTesting$classe)$overall[[1]])
+
+```
+
+As it can be seen, the Random Forest model is the one that has the higher accuracy, so, it will be the one used for predicting the test set.
+```{r}
+acc <- as.data.frame(acc)
+colnames(acc)<- c("Decission Trees", "Random Forests 1", "Random Forests2", "LDA", "GBM", "Combined Method(LDA+GBM)")
+acc
+```
+##Check with test set
+Finally, the model that had the higher accuracy, in this case the Random  Forest is the one that will be used to compute the 
+```{r}
+
+
+testing$classe <- predict(model3,newdata = testing )
+testing$classe
+```
